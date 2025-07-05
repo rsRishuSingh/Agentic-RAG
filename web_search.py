@@ -1,7 +1,7 @@
 import requests
 import wikipediaapi
 
-SERPER_API_KEY = ""
+SERPER_API_KEY = "8351c8d666a70eaf483cc0f2a0c120440aaa0b96"
 
 def serper_search(query: str, num: int = 5, api_key: str = SERPER_API_KEY) -> dict:
     """
