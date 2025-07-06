@@ -1,5 +1,6 @@
 import requests
-import wikipediaapi
+import wikipedia
+from wikipedia.exceptions import DisambiguationError, PageError
 
 SERPER_API_KEY = "8351c8d666a70eaf483cc0f2a0c120440aaa0b96"
 
@@ -28,30 +29,50 @@ def serper_search(query: str, num: int = 5, api_key: str = SERPER_API_KEY) -> di
     response.raise_for_status()
     return response.json()
 
-def get_wikipedia_page(title: str, user_agent: str = "AgenticAI/1.0 (contact@example.com)") -> dict:
+def get_wikipedia_page(title: str, language: str = "en") -> dict:
     """
-    Fetch Wikipedia page content using wikipediaapi.
-    
+    Fetch Wikipedia page content using the `wikipedia` package.
+
     Args:
         title (str): Title of the Wikipedia page.
-        user_agent (str): Custom User-Agent string for the requests.
-    
+        language (str): Language code (e.g., 'en', 'hi', 'fr').
+
     Returns:
-        dict: Dictionary with page existence, summary, and full text.
+        dict: Dictionary with page existence, title, summary, content, and URL.
+              If page does not exist or is ambiguous, returns an error message.
     """
+    wikipedia.set_lang(language)
     
-    wiki = wikipediaapi.Wikipedia(user_agent=user_agent, language="en")
-    page = wiki.page(title)
-    return {
-        "exists": page.exists(),
-        "title": page.title,
-        "summary": page.summary,
-        "content": page.text
-    }
+    try:
+        page = wikipedia.page(title)
+        return {
+            "exists": True,
+            "title": page.title,
+            "summary": wikipedia.summary(title, sentences=2),
+            "content": page.content,
+            "url": page.url
+        }
+    except DisambiguationError as e:
+        return {
+            "exists": False,
+            "error": f"DisambiguationError: '{title}' refers to multiple pages.",
+            "options": e.options
+        }
+    except PageError:
+        return {
+            "exists": False,
+            "error": f"PageError: The page titled '{title}' does not exist."
+        }
+    except Exception as e:
+        return {
+            "exists": False,
+            "error": f"UnexpectedError: {str(e)}"
+        }
+
 
 # Example usage:
 query = 'Share price of tesla'
 results = serper_search(query)
 print(results)
-wiki_data = get_wikipedia_page("tesla")
+wiki_data = get_wikipedia_page("Tesla")
 print(wiki_data)

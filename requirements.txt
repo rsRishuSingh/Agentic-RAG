@@ -1,0 +1,38 @@
+# Core utilities
+python-dotenv
+PyMuPDF                # provides fitz
+chainlit               # your Chainlit app framework
+
+# LangChain and its extensions
+langchain>=0.3.26
+langchain-text-splitters
+langchain-huggingface
+langchain-community
+langchain-chroma
+langchain-neo4j
+langchain-groq
+langchain-experimental  # for langchain.experimental.graph_transformers
+
+# Vectorstores & embeddings
+chromadb
+sentence-transformers   # SentenceTransformer & Chroma EmbeddingFunction
+
+# LLMs
+groq
+openai
+
+# Retrieval
+rank-bm25
+
+# ML backends
+torch
+numpy
+transformers
+pandas
+
+# Web search
+wikipedia
+
+# Image
+IPython
+grandalf
