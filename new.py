@@ -1,5 +1,6 @@
 import requests
-
+import os
+import json
 def get_wikipedia_page_mw(title: str, language: str = "en") -> dict:
     """
     Fetch full Wikipedia page content using the MediaWiki Action API.
@@ -51,5 +52,37 @@ def get_wikipedia_page_mw(title: str, language: str = "en") -> dict:
             "exists": False,
             "error": f"RequestError: {str(e)}"
         }
-wiki_data = get_wikipedia_page_mw("A. P. J. Abdul Kalam")
+
+SERPER_API_KEY   = os.getenv("SERPER_API_KEY")  
+def google_search(query: str, num: int = 20) -> dict:
+    """
+    Web search via Serper API for real-time news and factual queries.
+
+    Args:
+        query (str): Search string to send to the API.
+        num (int): Number of top results to retrieve (default: 5).
+
+    Returns:
+        dict: Parsed JSON response from Serper with search results.
+    """
+    url = "https://google.serper.dev/search"
+    payload = {"q": query, "num": num}
+    headers = {"X-API-KEY": SERPER_API_KEY, "Content-Type": "application/json"}
+    response = requests.post(url, json=payload, headers=headers)
+    payload = json.dumps({
+    "q": query,
+  "num": num,
+  "tbs": "qdr:d"
+})
+    headers = {
+  'X-API-KEY': '8351c8d666a70eaf483cc0f2a0c120440aaa0b96',
+  'Content-Type': 'application/json'
+}
+
+    response = requests.request("POST", url, headers=headers, data=payload)
+
+    print('Google Search Result --> ', response, end='\n\n')
+    return response.text
+
+wiki_data = google_search("TATA Motors Share price")
 print(wiki_data)
