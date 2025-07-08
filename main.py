@@ -17,7 +17,7 @@ from langchain.retrievers import EnsembleRetriever
 from langchain_chroma import Chroma
 from langchain_community.retrievers import BM25Retriever
 
-from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage, ToolMessage
+from langchain_core.messages import BaseMessage, SystemMessage, HumanMessage, ToolMessage, AIMessage
 from langchain_groq import ChatGroq
 from langchain_core.tools import tool
 from langgraph.graph import StateGraph, START, END
@@ -35,7 +35,7 @@ ALL_DOCS_JSON    = os.getenv("ALL_DOCS_JSON", "all_docs.json")
 CHROMA_DB_PATH   = os.getenv("CHROMA_DB_PATH", "chromaDB/saved/")
 COLLECTION_NAME  = os.getenv("COLLECTION_NAME", "RAG_DOCS")
 EMBED_MODEL_NAME = os.getenv("EMBED_MODEL_NAME", "sentence-transformers/all-MiniLM-L6-v2")
-
+ALPHAVANTAGE_API_KEY = os.getenv("ALPHAVANTAGE_API_KEY")
 
 # -------------------------------------------------------------------
 # DOCUMENT STORAGE UTILITIES
@@ -189,6 +189,38 @@ def wiki_lookup(title: str, language: str = "en") -> dict:
         }
 # ----- Financial Metrics Tools ----- #
 @tool
+def company_overview(symbol: str) -> dict:
+    """
+    Fetch company info & key financial metrics for a ticker via Alpha Vantage.
+
+    Args:
+        symbol (str): Stock ticker, e.g. "IBM" or "AAPL".
+
+    Returns:
+        dict: Overview fields such as Name, Exchange, MarketCap,
+              P/E & PEG ratios, Dividends, Margins, Growth rates,
+              Analyst targets, Valuation ratios, and 52‑week highs/lows.
+    """
+    # ensure .env has ALPHAVANTAGE_API_KEY=<your_key>
+  
+ 
+    if not ALPHAVANTAGE_API_KEY:
+        raise ValueError("Set ALPHAVANTAGE_API_KEY in your environment before calling this tool.")
+    
+    url = "https://www.alphavantage.co/query"
+    params = {
+        "function": "OVERVIEW",
+        "symbol": symbol,
+        "apikey": ALPHAVANTAGE_API_KEY,
+    }
+    resp = requests.get(url, params=params, timeout=10)
+    resp.raise_for_status()
+    data = resp.json()
+
+    return data
+
+
+@tool
 def sharpe_ratio(returns: List[float], risk_free_rate: float = 0.0) -> float:
     """
     Calculate the Sharpe Ratio for a return series.
@@ -308,34 +340,24 @@ class AgentState(TypedDict):
         user_data (Any): Optional storage for parsed user inputs or context.
     """
     messages: Annotated[Sequence[BaseMessage], add_messages]
+    query: str
     user_data: Any
 
 # Instantiate graph
 graph = StateGraph(AgentState)
 llm_query_redirector = ChatGroq(model=MODEL_NAME).bind_tools(
-    [hybrid_search, google_search, wiki_lookup, sharpe_ratio,
+    [hybrid_search, google_search, wiki_lookup, company_overview, sharpe_ratio,
      batting_average, capture_ratios, tracking_error, max_drawdown]
 )
 def entry_agent(state: AgentState) -> AgentState:
     """
     Entry node: Classify user intent to select the appropriate retrieval or calculation tool.
-
-    Behavior:
-      - Routes to FinancialMetrics if user provided numeric return series or asks about ratios.
-      - Uses Wikipedia lookup for historical/contextual 'wiki' queries.
-      - Uses web search for 'latest', 'current', 'news', or factual on real-time events.
-      - Defaults to hybrid local document search otherwise.
-
-    Always respond with exactly one of: 'Calling FinancialMetrics',
-                                    'Searching Wikipedia',
-                                    'Searching Web',
-                                    'Doing Hybrid Search'.
     """
     system_prompt = SystemMessage(
     content=(
         "You are a Retrieval‑Augmented Generation (RAG) orchestrator.\n"
         "Based on the user's message, decide which tool to invoke:\n"
-        "  1. FinancialMetrics: Only if the user provided a numeric return series or asks about ratios or drawdowns.\n"
+        "  1. FinancialMetrics: if the user provided a numeric return series or asks about ratios, metrics, stock analysis or permformance.\n"
         "  2. WikiLookup: Only if the query contains 'wiki' or requests historical/contextual background.\n"
         "  3. WebSearch: Only if the query contains 'latest', 'current', 'news', or factual real-time events.\n"
         "  4. HybridSearch: fallback for general document retrieval from local PDFs. These PDFs contain  detailed financial reports and security exchange filings of companies.\n\n"
@@ -347,19 +369,81 @@ def entry_agent(state: AgentState) -> AgentState:
     )
 )
 
-    
     llm_response = llm_query_redirector.invoke([system_prompt] + state["messages"])
     # print('LLM 1 --> ',llm_response)
+    
     return {"messages": [llm_response], "user_data": state.get("user_data")}
+    # return {"messages": [AIMessage(content=llm_response.content, kwargs=llm_response.additional_kwargs)], "user_data": state.get("user_data")}
+
+import json
+from langchain_core.messages import SystemMessage, HumanMessage
+from langchain_groq import ChatGroq
+from typing import Any
+
+def generate_stateful_query(
+    state: AgentState,
+    temperature: float = 0.8
+) -> str:
+    """
+    Generate one optimized financial search query, using the full history
+    of raw message dicts, each having 'content' and 'additional_kwargs'.
+
+    Args:
+      state: AgentState containing
+        - state["messages"]: List[dict] with keys 'content' and 'additional_kwargs'
+        - state["user_data"]["past_queries"]: List[str] of prior queries
+      temperature, max_tokens: LLM generation params
+
+    Returns:
+      A single, high‑precision, high‑recall financial search query.
+    """
+    user_data = state.setdefault("user_data", {})
+    history = user_data.setdefault("past_queries", [])
+
+    # Build a flattened context string from the last 5 messages
+    ctx_entries = []
+    for msg in state["messages"][-5:]:
+        line = f"{msg['type'].upper()}: {msg.get('content', '') or '<no content>'}"
+        ak = msg.get("additional_kwargs", {})
+
+        if "reasoning_content" in ak:
+            line += f"\n[reasoning] {ak['reasoning_content'].strip()}"
+
+        if "tool_calls" in ak and ak["tool_calls"]:
+            line += f"\n[tool_calls] {json.dumps(ak['tool_calls'], ensure_ascii=False)}"
+
+        ctx_entries.append(line)
+
+    context_str = "\n\n".join(ctx_entries)
+
+    system = SystemMessage(
+        content=(
+            "You are a Financial RAG assistant. Based on the full conversation context "
+            "below (including any silent reasoning and tool calls), produce exactly one "
+            "optimized search query for financial data. "
+            "Correct any conceptual errors in the user's request before expanding."
+        )
+    )
+    human = HumanMessage(
+        content=(
+            f"CONTEXT:\n{context_str}\n\n"
+            "Now generate a single, high‑recall and high‑precision financial search query "
+            "by adding relevant market terms, tickers/ISINs, and financial jargon."
+        )
+    )
+
+    llm = ChatGroq(model=MODEL_NAME, temperature=temperature)
+    response = llm.invoke([system, human])
+
+    query = response.content.strip()
+    history.append(query)
+    return query
+
 
 def answer_agent(state: AgentState) -> AgentState:
     """
     Final node: Integrates tool results into a concise, accurate response using the same bound tools.
 
-    Guidelines:
-      - Synthesize retrieved data into a coherent answer.
-      - Cite sources or state limitations if information is missing.
-      - Do not hallucinate; if uncertain, reply 'I don't know.'
     """
     final_prompt = SystemMessage(
         content=(
@@ -374,24 +458,36 @@ def answer_agent(state: AgentState) -> AgentState:
     # print('LLM 2 --> ',llm_response)
 
     return {"messages": [llm_response], "user_data": state.get("user_data")}
+    # return {"messages": [AIMessage(content=llm_response.content, kwargs=llm_response.additional_kwargs)], "user_data": state.get("user_data")}
 
 # Register and wire nodes
 graph.add_node('EntryAgent', entry_agent)
 graph.add_node('HybridNode', ToolNode([hybrid_search]))
 graph.add_node('WebNode', ToolNode([google_search, wiki_lookup]))
-graph.add_node('FinNode', ToolNode([sharpe_ratio, batting_average,
+graph.add_node('FinNode', ToolNode([company_overview,sharpe_ratio, batting_average,
                                      capture_ratios, tracking_error, max_drawdown]))
 graph.add_node('AnswerAgent', answer_agent)
 
 def route(state: AgentState) -> str:
     last_msg = state["messages"][-1]
-    calls = getattr(last_msg, "additional_kwargs", {}).get("tool_calls", [])
+    calls   = getattr(last_msg, "additional_kwargs", {}).get("tool_calls", [])
     if calls:
         tool_name = calls[0]["function"]["name"]
-        if tool_name in ("sharpe_ratio","tracking_error"): return "FinNode"
-        if tool_name in ("google_search","wiki_lookup"):      return "WebNode"
-        if tool_name in ("hybrid_search",):                  return "HybridNode"
-    # fallback, or inspect content if you prefer
+        # catch every finance‐related tool in FinNode
+        if tool_name in (
+            "company_overview",
+            "sharpe_ratio",
+            "batting_average",
+            "capture_ratios",
+            "tracking_error",
+            "max_drawdown"
+        ):
+            return "FinNode"
+        if tool_name in ("google_search", "wiki_lookup"):
+            return "WebNode"
+        if tool_name in ("hybrid_search",):
+            return "HybridNode"
+    # fallback
     return "HybridNode"
 
 # Graph wiring
@@ -409,7 +505,7 @@ app = graph.compile()
 
 if __name__ == '__main__':
     
-    user_input = HumanMessage(content='''current market sentiment about Walmart ''')
+    user_input = HumanMessage(content='''What is the EVToRevenue and ShareVolume of IBM''')
     state = {'messages': [user_input], 'user_data': None}
     response = app.invoke(state)
     print(response['messages'][-1].content, end='\v')
