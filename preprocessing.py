@@ -13,6 +13,12 @@ from langchain.retrievers import EnsembleRetriever
 from langchain_chroma import Chroma
 from langchain_community.retrievers import BM25Retriever
 
+
+import pdfplumber
+import json
+import re
+from collections import defaultdict
+
 # Load environment variables from .env
 load_dotenv()
 
@@ -20,11 +26,11 @@ load_dotenv()
 EMBED_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 COLLECTION_NAME = "RAG_DOCS"
 CHROMA_DB_PATH = "chromaDB/saved/"
-PDF_DIR = "PDFs/"
+PDF_DIR = "PDFs"
 ALL_DOCS_JSON = "all_docs.json"
 
 
-def recursive_split(text: str, chunk_size: int = 500, chunk_overlap: int = 100) -> List[str]:
+def recursive_split(text: str, chunk_size: int = 700, chunk_overlap: int = 200) -> List[str]:
     """
     Split text using character-level recursion based on newlines and punctuation.
     
@@ -60,6 +66,79 @@ def semantic_chunker(text: str, embeddings_model) -> List[str]:
         chunker = SemanticChunker(embeddings_model)
         chunks.extend(chunker.split_text(segment))
     return chunks
+
+def heading_above(table_obj, page):
+    """
+    Find the single text line whose bottom edge is closest above the table,
+    but skip any line that contains digits, '$' or '%', since those are
+    usually units/column headers, not the true title.
+    """
+    x0, top, x1, _ = table_obj.bbox
+    words = page.extract_words(use_text_flow=True)
+
+    # cluster words into lines by their top y-coordinate
+    lines = defaultdict(list)
+    for w in words:
+        key = round(w["top"], 0)
+        lines[key].append(w)
+
+    # build (y_bottom, text) candidates for any line that overlaps horizontally
+    candidates = []
+    for y0, ws in lines.items():
+        y1 = max(w["bottom"] for w in ws)
+        if y1 < top and any(w["x0"] < x1 and w["x1"] > x0 for w in ws):
+            text = " ".join(w["text"] for w in sorted(ws, key=lambda w: w["x0"]))
+            candidates.append((y1, text))
+
+    if not candidates:
+        return ""
+
+    # filter out any line with digits, $ or %
+    filtered = [(y, t) for (y, t) in candidates if not re.search(r"[\d\$\%]", t)]
+
+    # use the filtered list if non-empty, otherwise fall back to all candidates
+    use = filtered if filtered else candidates
+
+    #  pick the one whose bottom edge is highest (closest to the table)
+    return max(use, key=lambda t: t[0])[1]
+
+def extract_tables_with_headings(
+    pdf_path: str
+) -> List[Document]:
+    
+    docs: List[Document] = []
+
+    with pdfplumber.open(pdf_path) as pdf:
+        for page_num, page in enumerate(pdf.pages, start=1):
+            for table_no, table_obj in enumerate(page.find_tables(), start=1):
+
+                try:
+                    # this is where ZeroDivisionError is coming from
+                    table_data = table_obj.extract()
+                except ZeroDivisionError:
+                    # skip any table that blows up
+                    continue
+
+                if not table_data:
+                    continue
+               
+                title      = heading_above(table_obj, page) or f"Table {table_no}"
+                
+                table_lines = ["\t".join(cell or "" for cell in row) for row in table_data]
+                table_text  = "\n".join(table_lines)
+
+                # build Document
+                doc = Document(
+                    page_content=table_text,
+                    metadata={
+                        "page":     page_num,
+                        "table_no": table_no,
+                        "heading":  title
+                    }
+                )
+                docs.append(doc)
+    
+    return docs
 
 
 def extract_chunks_from_pdf(pdf_path: str, embeddings_model) -> List[Document]:
@@ -97,6 +176,9 @@ def extract_chunks_from_pdf(pdf_path: str, embeddings_model) -> List[Document]:
                     )
                 )
         pdf.close()
+        table_docs = extract_tables_with_headings(pdf_path)
+        documents.extend(table_docs)
+
 
     except Exception as e:
         print(f"❌ Error while processing PDF '{pdf_path}': {e}")
@@ -166,7 +248,7 @@ def init_chroma() -> Chroma:
     )
 
 
-def create_chunks(PDF_FILES: List[str]) -> None:
+def create_chunks(PDF_FILES: List[str], PDF_DIR: str = 'PDFs') -> None:
     """
     Process PDF files and generate semantic chunks for RAG.
 
@@ -175,10 +257,10 @@ def create_chunks(PDF_FILES: List[str]) -> None:
     """
     embeddings = HuggingFaceEmbeddings(model_name=EMBED_MODEL_NAME)
     docs = load_docs(ALL_DOCS_JSON)
-
+    PDF_PATH = PDF_DIR +'/'
     if not docs:
         for name in PDF_FILES:
-            path = os.path.join(PDF_DIR, f"{name}.pdf")
+            path = os.path.join(PDF_PATH, f"{name}.pdf")
             if os.path.exists(path):
                 docs.extend(extract_chunks_from_pdf(path, embeddings))
             else:

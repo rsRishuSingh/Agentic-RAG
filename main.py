@@ -8,6 +8,7 @@ import fitz  # PyMuPDF for PDF parsing
 import requests
 import numpy as np
 from save_result import append_to_response
+from preprocessing import create_chunks, init_chroma, load_docs
 
 from langchain.docstore.document import Document
 from langchain_huggingface import HuggingFaceEmbeddings
@@ -24,6 +25,8 @@ from langgraph.graph import StateGraph, START, END
 from langgraph.prebuilt import ToolNode
 from langgraph.graph.message import add_messages
 
+
+
 # -------------------------------------------------------------------
 # ENVIRONMENT & MODEL INITIALIZATION
 # -------------------------------------------------------------------
@@ -36,45 +39,73 @@ CHROMA_DB_PATH   = os.getenv("CHROMA_DB_PATH", "chromaDB/saved/")
 COLLECTION_NAME  = os.getenv("COLLECTION_NAME", "RAG_DOCS")
 EMBED_MODEL_NAME = os.getenv("EMBED_MODEL_NAME", "sentence-transformers/all-MiniLM-L6-v2")
 ALPHAVANTAGE_API_KEY = os.getenv("ALPHAVANTAGE_API_KEY")
+pdfs_list = ['TESLA']
 
-# -------------------------------------------------------------------
-# DOCUMENT STORAGE UTILITIES
-# -------------------------------------------------------------------
-
-def load_docs(filepath: str = ALL_DOCS_JSON) -> List[Document]:
+# Instantiate graph
+class AgentState(TypedDict):
     """
-    Load pre-chunked documents from a JSON file for RAG retrieval.
+    State dictionary storing chat messages and any user-specific data.
+
+    Fields:
+        messages: (Sequence[BaseMessage]): Conversation history for the agent 1.
+        user_data (Any): Optional storage for parsed user inputs or context.
+    """
+    messages: Annotated[Sequence[BaseMessage], add_messages]
+    user_data: Any
+
+
+def get_context(state: AgentState, num_messages: int = 10) -> str:
+    """
+    Builds a well-structured context string from the last `num_messages`
+    in state["messages"], including content, hidden reasoning, and tool calls.
 
     Args:
-        filepath (str): Path to the JSON file containing stored Document objects.
+        state: AgentState with "messages" list of BaseMessage objects.
+        num_messages: Number of recent messages to include (default 10).
 
     Returns:
-        List[Document]: A list of Document instances with page_content and metadata.
+        A formatted multi-line string representing the conversation history.
     """
-    if not os.path.exists(filepath):
-        return []
-    with open(filepath, "r", encoding="utf-8") as f:
-        items = json.load(f)
-    return [Document(page_content=i["page_content"], metadata=i["metadata"]) for i in items]
+    ctx_entries: List[str] = []
 
+    # Take the last num_messages items
+    recent = state["messages"][-num_messages:]
 
-def init_chroma() -> Chroma:
-    """
-    Initialize or load an existing Chroma vector store for document embeddings.
+    for msg in recent:
+        # 1) Determine speaker label
+        msg_type = getattr(msg, "type",
+                           msg.__class__.__name__.replace("Message", "").lower())
+        speaker = msg_type.title()  # e.g. "Human", "Ai", "Tool"
 
-    Returns:
-        Chroma: A Chroma object pointing to the persisted vector database.
-    """
-    return Chroma(
-        persist_directory=CHROMA_DB_PATH,
-        collection_name=COLLECTION_NAME,
-        embedding_function=HuggingFaceEmbeddings(model_name=EMBED_MODEL_NAME)
-    )
+        # 2) Main content
+        content = getattr(msg, "content", "<no content>") or "<no content>"
+        entry_lines = [f"{speaker} Content: {content}"]
 
-# -------------------------------------------------------------------
-# TOOL DEFINITIONS
-# -------------------------------------------------------------------
+        # 3) Hidden reasoning
+        ak = getattr(msg, "additional_kwargs", {}) or {}
+        reasoning = ak.get("reasoning_content")
+        if reasoning:
+            entry_lines.append(f"{speaker} Reasoning: {reasoning.strip()}")
 
+        # 4) Tool calls
+        tool_calls = ak.get("tool_calls") or []
+        for call in tool_calls:
+            fn = call["function"]["name"]
+            # Merge positional args and keyword args
+            args = call.get("args", []) or []
+            kwargs = call.get("kwargs", {}) or {}
+            args_repr = ", ".join(
+                [repr(a) for a in args] +
+                [f"{k}={v!r}" for k, v in kwargs.items()]
+            )
+            entry_lines.append(f"Tool Call: {fn}({args_repr})")
+
+        # Combine this message block
+        ctx_entries.append("\n".join(entry_lines))
+
+    # Join all blocks with a visible separator
+    return "\n\n---\n\n".join(ctx_entries)
+# Hybrid Search Tool
 @tool
 def hybrid_search(query: str) -> List[dict]:
     """
@@ -88,6 +119,8 @@ def hybrid_search(query: str) -> List[dict]:
     """
     chroma_store = init_chroma()
     docs = load_docs()
+    if not docs:
+        create_chunks(pdfs_list)
     if chroma_store._collection.count() == 0 and docs:
         chroma_store.add_documents(docs)
 
@@ -104,6 +137,8 @@ def hybrid_search(query: str) -> List[dict]:
 
     return [{"text": d.page_content, **d.metadata} for d in results]
 
+
+# Web Search Tools
 @tool
 def google_search(query: str, num: int = 20) -> dict:
     """
@@ -187,7 +222,9 @@ def wiki_lookup(title: str, language: str = "en") -> dict:
             "exists": False,
             "error": f"RequestError: {str(e)}"
         }
-# ----- Financial Metrics Tools ----- #
+
+
+# Financial Metrics Tools
 @tool
 def company_overview(symbol: str) -> dict:
     """
@@ -218,7 +255,6 @@ def company_overview(symbol: str) -> dict:
     data = resp.json()
 
     return data
-
 
 @tool
 def sharpe_ratio(returns: List[float], risk_free_rate: float = 0.0) -> float:
@@ -328,143 +364,188 @@ def max_drawdown(returns: List[float]) -> float:
     peak = np.maximum.accumulate(wealth)
     return float(((wealth - peak) / peak).min())
 
-# -------------------------------------------------------------------
-# AGENT GRAPH DEFINITION & PROMPTS
-# -------------------------------------------------------------------
-class AgentState(TypedDict):
-    """
-    State dictionary storing chat messages and any user-specific data.
-
-    Fields:
-        messages: (Sequence[BaseMessage]): Conversation history for the agent 1.
-        user_data (Any): Optional storage for parsed user inputs or context.
-    """
-    messages: Annotated[Sequence[BaseMessage], add_messages]
-    query: str
-    user_data: Any
-
-# Instantiate graph
-graph = StateGraph(AgentState)
-llm_query_redirector = ChatGroq(model=MODEL_NAME).bind_tools(
-    [hybrid_search, google_search, wiki_lookup, company_overview, sharpe_ratio,
-     batting_average, capture_ratios, tracking_error, max_drawdown]
-)
-def entry_agent(state: AgentState) -> AgentState:
-    """
-    Entry node: Classify user intent to select the appropriate retrieval or calculation tool.
-    """
-    system_prompt = SystemMessage(
-    content=(
-        "You are a Retrieval‑Augmented Generation (RAG) orchestrator.\n"
-        "Based on the user's message, decide which tool to invoke:\n"
-        "  1. FinancialMetrics: if the user provided a numeric return series or asks about ratios, metrics, stock analysis or permformance.\n"
-        "  2. WikiLookup: Only if the query contains 'wiki' or requests historical/contextual background.\n"
-        "  3. WebSearch: Only if the query contains 'latest', 'current', 'news', or factual real-time events.\n"
-        "  4. HybridSearch: fallback for general document retrieval from local PDFs. These PDFs contain  detailed financial reports and security exchange filings of companies.\n\n"
-        "After your internal reasoning, reply with exactly one of the following as the message content:\n"
-        "  • 'Calling FinancialMetrics'\n"
-        "  • 'Searching Wikipedia'\n"
-        "  • 'Searching Web'\n"
-        "  • 'Doing Hybrid Search'\n"
-    )
-)
-
-    llm_response = llm_query_redirector.invoke([system_prompt] + state["messages"])
-    # print('LLM 1 --> ',llm_response)
-    
-    return {"messages": [llm_response], "user_data": state.get("user_data")}
-    # return {"messages": [AIMessage(content=llm_response.content, kwargs=llm_response.additional_kwargs)], "user_data": state.get("user_data")}
-
-def generate_stateful_query(
+# Query Expansion 
+def expand_query(
     state: AgentState,
     temperature: float = 0.8
-) -> str:
+) -> AgentState:
     """
     Generate one optimized financial search query, using the full history
-    of raw message dicts, each having 'content' and 'additional_kwargs'.
+    of BaseMessage objects (with .content and .additional_kwargs),
+    and return an updated AgentState containing the generated query as a new message.
 
     Args:
       state: AgentState containing
-        - state["messages"]: List[dict] with keys 'content' and 'additional_kwargs'
-        - state["user_data"]["past_queries"]: List[str] of prior queries
-      temperature, max_tokens: LLM generation params
+        - state["messages"]: List[BaseMessage] conversation history
+        - state["user_data"]: Any past query data
+      temperature: LLM sampling temperature
 
     Returns:
-      A single, high‑precision, high‑recall financial search query.
+      An AgentState dict with the new query appended to "messages" and unchanged "user_data".
     """
-    user_data = state.setdefault("user_data", {})
-    history = user_data.setdefault("past_queries", [])
+    
 
-    # Build a flattened context string from the last 5 messages
-    ctx_entries = []
-    for msg in state["messages"][-5:]:
-        line = f"{msg['type'].upper()}: {msg.get('content', '') or '<no content>'}"
-        ak = msg.get("additional_kwargs", {})
-
-        if "reasoning_content" in ak:
-            line += f"\n[reasoning] {ak['reasoning_content'].strip()}"
-
-        if "tool_calls" in ak and ak["tool_calls"]:
-            line += f"\n[tool_calls] {json.dumps(ak['tool_calls'], ensure_ascii=False)}"
-
-        ctx_entries.append(line)
-
-    context_str = "\n\n".join(ctx_entries)
-
+    context_str = get_context(state)
+    # Construct system and human prompts for the LLM
     system = SystemMessage(
         content=(
-            "You are a Financial RAG assistant. Based on the full conversation context "
-            "below (including any silent reasoning and tool calls), produce exactly one "
-            "optimized search query for financial data. "
-            "Correct any conceptual errors in the user's request before expanding."
+            "You are a Financial Retrieval‑Augmented Generation assistant. "
+            "Your goal is to craft exactly one search query that balances recall and precision, "
+            "tailored for financial data (tickers, ISINs, jargon). "
+            "Use the full conversation context—including silent reasoning and tool calls—to correct "
+            "any conceptual errors and maximize relevance."
         )
     )
     human = HumanMessage(
         content=(
-            f"CONTEXT:\n{context_str}\n\n"
-            "Now generate a single, high‑recall and high‑precision financial search query "
-            "by adding relevant market terms, tickers/ISINs, and financial jargon."
+            "RECENT CONVERSATION:\n"
+            f"{context_str}\n\n"
+            "Based on this context, produce **one** optimized financial search query. "
+            "Include relevant tickers, ISINs, and financial terminology to ensure both broad coverage "
+            "and specificity. Do not append any explanation—just return the query string."
         )
     )
 
+    # Invoke the LLM to get the query
     llm = ChatGroq(model=MODEL_NAME, temperature=temperature)
     response = llm.invoke([system, human])
-
     query = response.content.strip()
-    history.append(query)
-    return query
+
+    # Wrap the generated query in a HumanMessage and append to the conversation
+    new_msg = HumanMessage(content=query)
+
+    append_to_response([{"expand_query":[response,new_msg]}], filename="check_agent_log.json")
+    return {
+        "messages": [new_msg],
+        "user_data": state["user_data"]
+    }
+
+# Node for Taking query  
+def input_query(state: AgentState)->AgentState:
+    '''This nodes takes user input'''
 
 
-def answer_agent(state: AgentState) -> AgentState:
+    final_prompt = SystemMessage( content=(
+    "You are a conversational assistant. "
+    "If there is no prior conversation, greet the user and invite their question. "
+    "Otherwise, ask a concise, relevant follow‑up question based on the conversation history. "
+    "If the user indicates they’re satisfied, ."))
+
+    llm = ChatGroq(model=MODEL_NAME)
+    llm_response = llm.invoke([final_prompt] + [get_context(state)])
+    query = input(f"{llm_response.content}\n --> USER: ")
+    user_input = HumanMessage(content=query)
+    append_to_response([{"input_query":[llm_response,user_input]}], filename="check_agent_log.json")
+
+    return {"messages": [user_input], "user_data": state.get("user_data")}
+   
+
+def answer_query(state: AgentState) -> AgentState:
     """
     Final node: Integrates tool results into a concise, accurate response using the same bound tools.
 
     """
     final_prompt = SystemMessage(
         content=(
-            "You are a knowledgeable assistant. Use the tool outputs and conversation history to answer the user's query thoroughly. "
-            "- Provide clear explanations, structured when appropriate. "
-            "- If data is incomplete, acknowledge the gap. "
-            "- Always be concise and accurate."
+            "You are a knowledgeable assistant integrating tool outputs and conversation history. "
+            "When crafting your answer:\n"
+            "  • Be concise yet thorough; structure with headings or bullet points when helpful.\n"
+            "  • Cite any tool or external data you used, and link to sources if available.\n"
+            "  • If data is missing or incomplete, acknowledge it explicitly.\n"
+            "  • Maintain accuracy and clarity—do not hallucinate.\n"
         )
     )
     llm = ChatGroq(model=MODEL_NAME)
-    llm_response = llm.invoke([final_prompt] + state["messages"])
-    # print('LLM 2 --> ',llm_response)
+    llm_response = llm.invoke([final_prompt] + [get_context(state)])
+    print(llm_response.content)
+    append_to_response([{"answer_query":llm_response}], filename="check_agent_log.json")
+    
+    return {"messages": [llm_response], "user_data": state.get("user_data")}
 
+    
+# Agent for Query Redirection
+def query_redirection_agent(state: AgentState) -> AgentState:
+    """
+    Entry node: Classify user intent to select the appropriate retrieval or calculation tool.
+    """
+    system_prompt = SystemMessage(
+    content=(
+            "You are a Retrieval‑Augmented Generation orchestrator. "
+            "Analyze the user’s latest message, the conversation history, and any prior tool outputs to choose exactly one next action:\n"
+            "  1. Calling FinancialMetrics — when the user supplies numeric time series or asks about specific ratios, technical indicators, or financial analyses.\n"
+            "  2. Searching Wikipedia — when the user explicitly mentions “wiki” or requests historical or contextual background.\n"
+            "  3. Searching Web — when the user asks for “latest”, “current”, “news”, or any real‑time factual update.\n"
+            "  4. Doing Hybrid Search — as a fallback for general document retrieval from local PDFs (e.g. annual reports or SEC filings).\n"
+            "  5. Return 'Moving to CheckAgent' as response — when if the existing conversation already contains the answer of user's query.\n\n"
+            "After your internal reasoning, respond with exactly one of in same format:\n"
+            "  • Calling FinancialMetrics\n"
+            "  • Searching Wikipedia\n"
+            "  • Searching WebSearch\n"
+            "  • Doing HybridSearch\n"
+            "  • Moving to CheckAgent\n"
+    )
+)
+
+    llm_response = llm_query_redirector.invoke([system_prompt] + [get_context(state)])
+    # print('LLM 1 --> ',llm_response)
+    append_to_response([{"query_redirection_agent":llm_response}], filename="check_agent_log.json")
+    
     return {"messages": [llm_response], "user_data": state.get("user_data")}
     # return {"messages": [AIMessage(content=llm_response.content, kwargs=llm_response.additional_kwargs)], "user_data": state.get("user_data")}
 
+
+# Agent for Answer Checking  
+def check_agent(state: AgentState)->AgentState:
+    """
+    check_agent: checks wether reterived content from tools is relevent to user query and previous conversion history
+
+    """
+    final_prompt = SystemMessage( content=(
+         "You are an intelligent orchestration assistant. "
+        "Analyze the user’s latest query, retrieved tool outputs, and conversation history to decide the next step:\n"
+        "  1. Return “Doing QueryExpansion” as response if the user’s query is ambiguous, factually incorrect, or missing key details (e.g. company names, dates).\n"
+        "  2. Return “Doing QueryRedirection” as response if the query is clear but the retrieved content is irrelevant or insufficient.\n"
+        "  3. Return  “GeneratingAnswer” as response if the retrieved content fully addresses the user’s information needs.\n\n"
+        "After internal reasoning, respond with exactly one of responses in same format:\n"
+        "  • “Doing QueryExpansion\n"
+        "  • Doing QueryRedirection\n"
+        "  • GeneratingAnswer\n"
+        )
+    )
+    llm_reponse_checker = ChatGroq(model=MODEL_NAME)
+    llm_response = llm_reponse_checker.invoke([final_prompt] + [get_context(state)])
+    append_to_response([{"check_agent":llm_response}], filename="check_agent_log.json")
+
+    return {"messages": [llm_response], "user_data": state.get("user_data")}
+
+     
+        
+llm_query_redirector = ChatGroq(model=MODEL_NAME).bind_tools(
+    [hybrid_search, google_search, wiki_lookup, company_overview, sharpe_ratio,
+     batting_average, capture_ratios, tracking_error, max_drawdown]
+)
+
+
+
+# Instantiate graph
+graph = StateGraph(AgentState)
+
 # Register and wire nodes
-graph.add_node('EntryAgent', entry_agent)
+graph.add_node('InputNode', input_query)
+graph.add_node('AnswerQueryNode', answer_query)
+graph.add_node('ExpandQueryNode', expand_query)
+
 graph.add_node('HybridNode', ToolNode([hybrid_search]))
 graph.add_node('WebNode', ToolNode([google_search, wiki_lookup]))
 graph.add_node('FinNode', ToolNode([company_overview,sharpe_ratio, batting_average,
                                      capture_ratios, tracking_error, max_drawdown]))
-graph.add_node('AnswerAgent', answer_agent)
 
-def route(state: AgentState) -> str:
+graph.add_node('Query_Redirection_Agent', query_redirection_agent)
+graph.add_node('Check_Agent', check_agent)
+
+def route_redirector(state: AgentState) -> str:
     last_msg = state["messages"][-1]
+    content = last_msg.content
     calls   = getattr(last_msg, "additional_kwargs", {}).get("tool_calls", [])
     if calls:
         tool_name = calls[0]["function"]["name"]
@@ -480,29 +561,67 @@ def route(state: AgentState) -> str:
             return "FinNode"
         if tool_name in ("google_search", "wiki_lookup"):
             return "WebNode"
-        if tool_name in ("hybrid_search",):
+        if tool_name == "hybrid_search":
             return "HybridNode"
+        if "CheckAgent" in content:
+            return "Check_Agent"
     # fallback
     return "HybridNode"
 
+def route_user(state: AgentState) -> str:
+    last_msg = state["messages"][-1]
+    content   = last_msg.content
+    if "quit" in content.lower() or "exit" in content.lower():
+        return "END"
+    
+    return "ExpandQueryNode"
+
+def route_answer(state: AgentState) -> str:
+    last_msg = state["messages"][-1]
+    content = last_msg.content
+    if content:
+       
+        if "QueryExpansion" in content:
+            return "ExpandQueryNode"
+        
+        if "QueryRedirection" in content:
+            return "Query_Redirection_Agent"
+        
+        if "GeneratingAnswer" in content:
+            return "AnswerQueryNode"
+        
+    # fallback
+    return "AnswerQueryNode"
+
 # Graph wiring
-graph.set_entry_point('EntryAgent')
-graph.add_conditional_edges('EntryAgent', route, {
+graph.set_entry_point('InputNode')
+graph.add_conditional_edges('InputNode', route_user, {
+    "END":END,
+    "ExpandQueryNode":"ExpandQueryNode"
+
+})
+graph.add_edge("ExpandQueryNode","Query_Redirection_Agent")
+graph.add_conditional_edges('Query_Redirection_Agent', route_redirector, {
     'HybridNode': 'HybridNode',
     'WebNode': 'WebNode',
-    'FinNode': 'FinNode'
+    'FinNode': 'FinNode',
+    'Check_Agent':'Check_Agent'
 })
+
 for node in ['HybridNode', 'WebNode', 'FinNode']:
-    graph.add_edge(node, 'AnswerAgent')
-graph.add_conditional_edges('AnswerAgent', lambda _: 'end', {'end': END})
+    graph.add_edge(node, 'Check_Agent')
+
+graph.add_conditional_edges('Check_Agent', route_answer, {
+     
+    "ExpandQueryNode": "ExpandQueryNode",
+    "Query_Redirection_Agent": "Query_Redirection_Agent",
+    "AnswerQueryNode": "AnswerQueryNode"
+})
+graph.add_edge("AnswerQueryNode","InputNode")
 
 app = graph.compile()
 
-if __name__ == '__main__':
-    
-    user_input = HumanMessage(content='''What is the EVToRevenue and ShareVolume of IBM''')
-    state = {'messages': [user_input], 'user_data': None}
-    response = app.invoke(state)
-    print(response['messages'][-1].content, end='\v')
-    append_to_response(response['messages'])
-    # print(app.get_graph().draw_ascii())
+
+if __name__ == "__main__":
+    response = app.invoke({"messages":[], "user_data":""}, config={"recursion_limit": 50})
+    # append_to_response(response['messages'])
