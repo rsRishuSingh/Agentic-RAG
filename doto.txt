@@ -1,0 +1,6 @@
+make input agent with input tool
+add query expansion tool to check agent
+improve prompt of query expansion
+improve checkagent redirection to query redirector
+improve query redirector
+pass context and last query separately
