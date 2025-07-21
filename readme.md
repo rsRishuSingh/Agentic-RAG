@@ -6,7 +6,7 @@ A Retrieval-Augmented Generation (RAG) agent specialized for financial queries, 
 ![WorkFLow](<Output and Workflow/graph.png>)
 
 ## Chainlit UI
-![Output and Workflow/ui.png](<Output and Workflow/ui.png>)
+<img src="Output and Workflow/ui.png" width="500"/>
 
 ## Output
 ![Output](<Output and Workflow/output.png>)
