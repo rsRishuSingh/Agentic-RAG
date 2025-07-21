@@ -2,7 +2,7 @@
 
 A Retrieval-Augmented Generation (RAG) agent specialized for financial queries, combining local document search (PDFs), web/Wikipedia lookup, and portfolio analytics. Built with **LangChain**, **ChromaDB**, **BM25**, and a GROQ-powered LLM (Qwen-3-32B), orchestrated via a stateful graph.
 
-## RAG-Powered Financial Assistant
+## Workflow
 ![WorkFLow](<Output and Workflow/graph.png>)
 
 ## Chainlit UI
