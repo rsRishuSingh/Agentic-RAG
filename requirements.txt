@@ -36,3 +36,6 @@ wikipedia
 # Image
 IPython
 grandalf
+
+# graph
+langgraph
