@@ -4481,5 +4481,240 @@
       }
     },
     "timestamp": "2025-07-15T21:50:11.405318+05:30"
+  },
+  {
+    "input_query": [
+      {
+        "content": "",
+        "additional_kwargs": {},
+        "response_metadata": {},
+        "type": "ai",
+        "name": null,
+        "id": "4f6c715b-db57-4799-818a-12c916ce0d30",
+        "example": false,
+        "tool_calls": [],
+        "invalid_tool_calls": [],
+        "usage_metadata": null
+      },
+      {
+        "content": "Analyse the revenue of Tesla across each sector over the years?",
+        "additional_kwargs": {},
+        "response_metadata": {},
+        "type": "human",
+        "name": null,
+        "id": "aae4bf5c-e892-4170-a20b-b761193c1d74",
+        "example": false
+      }
+    ],
+    "timestamp": "2025-07-22T01:25:00.936385+05:30"
+  },
+  {
+    "input_query": {
+      "content": "what was revenue of telsa across each sector over the years?",
+      "additional_kwargs": {},
+      "response_metadata": {},
+      "type": "human",
+      "name": null,
+      "id": null,
+      "example": false
+    },
+    "previous_context": {
+      "content": "",
+      "additional_kwargs": {},
+      "response_metadata": {},
+      "type": "ai",
+      "name": null,
+      "id": null,
+      "example": false,
+      "tool_calls": [],
+      "invalid_tool_calls": [],
+      "usage_metadata": null
+    },
+    "timestamp": "2025-07-22T01:27:34.993129+05:30"
+  },
+  {
+    "query_redirection_agent": {
+      "content": "",
+      "additional_kwargs": {
+        "reasoning_content": "Okay, let's see. The user is asking for Tesla's revenue across each sector over the years. I need to figure out which tool to use here.\n\nFirst, looking at the available tools. The company_overview function is for when the user asks about specific ratios or financial analyses. But the user wants revenue by sector over time, which is more detailed. The Financial Metrics tools like sharpe_ratio or max_drawdown don't seem relevant here. \n\nWikipedia search might have some info, but Tesla's revenue by sector isn't probably in a Wikipedia page in detail. Google Search could help find the latest reports, but the user didn't mention \"latest\" or \"current\". Hybrid search is for local PDFs like annual reports. Since Tesla's financial breakdown by sector is usually found in their annual reports, maybe hybrid_search is the right choice. The user hasn't provided any prior data, so we need to retrieve the documents. \n\nI should call hybrid_search with a query about Tesla's revenue by sector over the years. That should fetch the necessary documents from local PDFs. Let me make sure there's no existing context. The conversation history shows the user hasn't provided any data, so we need to proceed with the search.\n",
+        "tool_calls": [
+          {
+            "id": "9r07a1djf",
+            "function": {
+              "arguments": "{\"query\":\"Tesla revenue by sector annual breakdown over years\"}",
+              "name": "hybrid_search"
+            },
+            "type": "function"
+          }
+        ]
+      },
+      "response_metadata": {
+        "token_usage": {
+          "completion_tokens": 282,
+          "prompt_tokens": 923,
+          "total_tokens": 1205,
+          "completion_time": 0.73112751,
+          "prompt_time": 0.042262851,
+          "queue_time": 0.061072229,
+          "total_time": 0.773390361
+        },
+        "model_name": "qwen/qwen3-32b",
+        "system_fingerprint": "fp_f17c2eb555",
+        "finish_reason": "tool_calls",
+        "logprobs": null
+      },
+      "type": "ai",
+      "name": null,
+      "id": "run--eccfbb32-c25b-4bea-bdf4-8313aa46214b-0",
+      "example": false,
+      "tool_calls": [
+        {
+          "name": "hybrid_search",
+          "args": {
+            "query": "Tesla revenue by sector annual breakdown over years"
+          },
+          "id": "9r07a1djf",
+          "type": "tool_call"
+        }
+      ],
+      "invalid_tool_calls": [],
+      "usage_metadata": {
+        "input_tokens": 923,
+        "output_tokens": 282,
+        "total_tokens": 1205
+      }
+    },
+    "timestamp": "2025-07-22T01:27:36.845875+05:30"
+  },
+  {
+    "hybrid_search": [
+      {
+        "text": "Depreciation is generally computed using the straight-line method over the estimated useful lives of the respective assets, as follows: Machinery, equipment, vehicles and office furniture 3 to 15 years Tooling 4 to 7 years Building and building improvements 15 to 30 years Computer equipment and software 3 to 6 years AI infrastructure 5 to 30 years Leasehold improvements are depreciated on a straight-line basis over their estimated useful lives. AI infrastructure includes our owned data centers",
+        "page": 70,
+        "chunk": 7,
+        "source": "TESLA.pdf"
+      },
+      {
+        "text": "Revenue Recognition Revenue by source The following table disaggregates our revenue by major source (in millions): Year Ended December 31, 2024 2023 2022 Automotive sales $ 72,480 $ 78,509 $ 67,210 Automotive regulatory credits 2,763 1,790 1,776 Energy generation and storage sales 9,564 5,515 3,376 Services and other 10,534 8,319 6,091 Total revenues from sales and services 95,341 94,133 78,453 Automotive leasing 1,827 2,120 2,476 Energy generation and storage leasing 522 520 533 Total revenues",
+        "page": 60,
+        "source": "TESLA.pdf",
+        "chunk": 0
+      },
+      {
+        "text": "The new crypto assets standard also enhances the other intangible asset disclosure requirements by requiring the name, cost basis, fair value, and number of units for each significant crypto asset holding. The new crypto assets standard is effective for annual periods beginning after December 15, 2024, including interim periods within those fiscal years",
+        "page": 74,
+        "chunk": 3,
+        "source": "TESLA.pdf"
+      },
+      {
+        "text": "Tesla aspires to do the right thing, and we are constantly looking for ways to do better. Available Information We file or furnish periodic reports and amendments thereto, including our Annual Reports on Form 10-K, our Quarterly Reports on Form 10-Q and Current Reports on Form 8-K, proxy statements and other information with the SEC. In addition, the SEC maintains a website (www.sec",
+        "page": 17,
+        "chunk": 13,
+        "source": "TESLA.pdf"
+      },
+      {
+        "text": "Such costs are amortized on a straight-line basis over their estimated useful life of three to five years",
+        "page": 71,
+        "chunk": 1,
+        "source": "TESLA.pdf"
+      },
+      {
+        "text": "TESLA, INC. ANNUAL REPORT ON FORM 10-K FOR THE YEAR ENDED DECEMBER 31, 2024 INDEX Page PART I. Item 1.",
+        "chunk": 0,
+        "source": "TESLA.pdf",
+        "page": 4
+      },
+      {
+        "text": "We hire, evaluate and promote employees based on their skills and performance. In 2024, over 13,000 of our employees worldwide, 80% of whom represent Tesla’s frontline workforce, took advantage of opportunities to advance their career within the Company. As of this report, more than two-thirds (68%) of our managers have been promoted from internal, non-managerial positions, and 45% of our management team has been with Tesla for over five years",
+        "page": 15,
+        "chunk": 8,
+        "source": "TESLA.pdf"
+      },
+      {
+        "text": ". For example, under current legislation, qualifying Tesla customers may receive up to $7,500 in federal tax credits for the purchase of qualified electric vehicles in the U.S. through 2032.",
+        "chunk": 9,
+        "source": "TESLA.pdf",
+        "page": 11
+      },
+      {
+        "text": ". Through 2024, Tesla expanded the program to new campuses and hired over 800 graduates with a goal for continued growth.",
+        "page": 15,
+        "chunk": 17,
+        "source": "TESLA.pdf"
+      },
+      {
+        "text": "current portion 1,834 2,041 Total liabilities $ 4,057 $ 3,777 Note 16 – Related Party Transactions Tesla periodically does business with certain entities with which its CEO and directors are affiliated, such as x",
+        "source": "TESLA.pdf",
+        "chunk": 2,
+        "page": 96
+      }
+    ],
+    "timestamp": "2025-07-22T01:29:19.772989+05:30"
+  },
+  {
+    "check_agent": {
+      "content": "<think>\nOkay, let's tackle this user query. The user is asking for Tesla's revenue across each sector over the years. I need to check the retrieved tool outputs to see if there's enough information.\n\nLooking at the tool content, there's a section from page 60 of the TESLA.pdf that breaks down revenue by source for 2024, 2023, and 2022. It lists Automotive sales, regulatory credits, Energy generation and storage sales, Services and other, and leasing revenues. That seems to cover different sectors like Automotive, Energy, and Services. The numbers are in millions, which the user would need.\n\nBut wait, the user mentioned \"each sector,\" and the tool content does list these categories. However, the Automotive regulatory credits might be a separate line item, and Services and other could be a catch-all. The user might expect more granularity, but the available data seems to split it into those main sectors. There's no mention of other sectors beyond that. \n\nI need to confirm if this data fully addresses the user's needs. The table shows the sources of revenue, which aligns with the query. Since the user asked for each sector over the years, and the tool provides the data for three years, this should be sufficient. No other tool outputs seem relevant here. The other chunks talk about depreciation, crypto assets, or unrelated topics, so they can be ignored. \n\nTherefore, the retrieved content does answer the query adequately. The correct response is to answer the query using this data.\n</think>\n\nanswer_query",
+      "additional_kwargs": {},
+      "response_metadata": {
+        "token_usage": {
+          "completion_tokens": 322,
+          "prompt_tokens": 1235,
+          "total_tokens": 1557,
+          "completion_time": 0.884603036,
+          "prompt_time": 0.377873784,
+          "queue_time": 0.055629576000000014,
+          "total_time": 1.26247682
+        },
+        "model_name": "qwen/qwen3-32b",
+        "system_fingerprint": "fp_f17c2eb555",
+        "finish_reason": "stop",
+        "logprobs": null
+      },
+      "type": "ai",
+      "name": null,
+      "id": "run--73ad81d2-8231-4fdb-be84-0f691a5ea903-0",
+      "example": false,
+      "tool_calls": [],
+      "invalid_tool_calls": [],
+      "usage_metadata": {
+        "input_tokens": 1235,
+        "output_tokens": 322,
+        "total_tokens": 1557
+      }
+    },
+    "timestamp": "2025-07-22T01:29:23.740166+05:30"
+  },
+  {
+    "answer_query": {
+      "content": "<think>\nOkay, let's see. The user is asking for Tesla's revenue across each sector over the years. I need to look through the provided tool content to find the relevant information.\n\nLooking at the tool content, there's a section titled \"Revenue Recognition Revenue by source\" with a table. The table shows revenue by major sources for the years 2024, 2023, and 2022. The sectors listed are Automotive sales, Automotive regulatory credits, Energy generation and storage sales, Services and other, Automotive leasing, and Energy generation and storage leasing. \n\nThe numbers are in millions. For example, in 2024, Automotive sales were $72,480 million, and Energy generation and storage sales were $9,564 million. The Services and other category was $10,534 million. Leasing revenues are also broken down. \n\nI should present this data clearly, breaking down each sector's revenue for each year. The user wants to see how each sector contributed over time. The source is the Tesla PDF, page 60, chunk 0. I need to make sure to cite the source properly and structure the answer with the different sectors and their corresponding figures for each year. Also, note that the total revenues are mentioned as well. Let me check if there's any other relevant data, but from the tool content provided, this seems to be the main section addressing the query. I don't see any other financial data related to sectors here. The answer should include the breakdown from the table and reference the source document.\n</think>\n\nAnswer:  \nTesla's revenue across key sectors for 2022, 2023, and 2024 (in millions) is detailed below, based on data from **TESLA.pdf (Page 60, Chunk 0)**:\n\n### **Revenue by Sector**  \n| **Sector**                     | **2024** | **2023** | **2022** |  \n|---------------------------------|----------|----------|----------|  \n| **Automotive Sales**            | $72,480  | $78,509  | $67,210  |  \n| **Automotive Regulatory Credits** | $2,763   | $1,790   | $1,776   |  \n| **Energy Generation & Storage Sales** | $9,564  | $5,515   | $3,376   |  \n| **Services & Other**            | $10,534  | $8,319   | $6,091   |  \n| **Automotive Leasing**          | $1,827   | $2,120   | $2,476   |  \n| **Energy Generation & Storage Leasing** | $522    | $520     | $533     |  \n\n### **Total Revenues**  \n- **2024**: $97,164 million (Sales/Services: $95,341M + Leasing: $2,349M)  \n- **2023**: $96,266 million (Sales/Services: $94,133M + Leasing: $2,649M)  \n- **2022**: $82,823 million (Sales/Services: $78,453M + Leasing: $3,009M)  \n\n### **Key Observations**  \n1. **Automotive Sales**: Declined slightly in 2024 compared to 2023 but remained the largest revenue source.  \n2. **Energy Sector Growth**: Energy generation and storage sales grew significantly (from $3,376M in 2022 to $9,564M in 2024).  \n3. **Regulatory Credits**: Increased in 2024, likely due to U.S. EV tax credit policies.  \n\nFor further analysis or clarification on specific sectors, let me know!",
+      "additional_kwargs": {},
+      "response_metadata": {
+        "token_usage": {
+          "completion_tokens": 885,
+          "prompt_tokens": 1180,
+          "total_tokens": 2065,
+          "completion_time": 1.786881213,
+          "prompt_time": 0.0541524,
+          "queue_time": 0.055971959,
+          "total_time": 1.841033613
+        },
+        "model_name": "qwen/qwen3-32b",
+        "system_fingerprint": "fp_f17c2eb555",
+        "finish_reason": "stop",
+        "logprobs": null
+      },
+      "type": "ai",
+      "name": null,
+      "id": "run--9968d011-22d1-43f3-a610-c4a477858b3d-0",
+      "example": false,
+      "tool_calls": [],
+      "invalid_tool_calls": [],
+      "usage_metadata": {
+        "input_tokens": 1180,
+        "output_tokens": 885,
+        "total_tokens": 2065
+      }
+    },
+    "timestamp": "2025-07-22T01:29:28.221850+05:30"
   }
 ]
