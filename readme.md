@@ -3,13 +3,15 @@
 A Retrieval-Augmented Generation (RAG) agent specialized for financial queries, combining local document search (PDFs), web/Wikipedia lookup, and portfolio analytics. Built with **LangChain**, **ChromaDB**, **BM25**, and a GROQ-powered LLM (Qwen-3-32B), orchestrated via a stateful graph.
 
 ## Workflow
-![WorkFLow](<Output and Workflow/graph.png>)
+<img src="Output and Workflow/graph.png" width="600"/>
+
 
 ## Chainlit UI
-<img src="Output and Workflow/ui.png" width="500"/>
+<img src="Output and Workflow/ui.png" width="800"/>
 
 ## Output
 ![Output](<Output and Workflow/output.png>)
+
 ## Features
 
 - **PDF Preprocessing & Chunking** - Extracts text and tables from financial PDFs. Splits content into semantic chunks (500-char with overlap) and stores in `all_docs.json`.
