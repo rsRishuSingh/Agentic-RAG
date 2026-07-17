@@ -1,15 +1,17 @@
-# RAG-Powered Financial Assistant
+# RAG-Powered Financial Agent
 
 A Retrieval-Augmented Generation (RAG) agent specialized for financial queries, combining local document search (PDFs), web/Wikipedia lookup, and portfolio analytics. Built with **LangChain**, **ChromaDB**, **BM25**, and a GROQ-powered LLM (Qwen-3-32B), orchestrated via a stateful graph.
 
-## RAG-Powered Financial Assistant
-![WorkFLow](<Output and Workflow/graph.png>)
+## Workflow
+<img src="Output and Workflow/graph.png" width="600"/>
+
 
 ## Chainlit UI
-![Output and Workflow/ui.png](<Output and Workflow/ui.png>)
+<img src="Output and Workflow/ui.png" width="800"/>
 
 ## Output
 ![Output](<Output and Workflow/output.png>)
+
 ## Features
 
 - **PDF Preprocessing & Chunking** - Extracts text and tables from financial PDFs. Splits content into semantic chunks (500-char with overlap) and stores in `all_docs.json`.
