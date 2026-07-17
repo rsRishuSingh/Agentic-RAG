@@ -26,6 +26,7 @@ from langchain.docstore.document import Document
 # -------------------------------------------------------------------
 load_dotenv()
 MODEL_NAME       = os.getenv("MODEL_NAME", "qwen/qwen3-32b")
+FAST_MODEL_NAME  = os.getenv("FAST_MODEL_NAME", "llama-3.1-8b-instant")
 SERPER_API_KEY   = os.getenv("SERPER_API_KEY")
 PDF_DIR          = os.getenv("PDF_DIR", "PDFs/")
 ALL_DOCS_JSON    = os.getenv("ALL_DOCS_JSON", "all_docs.json")
@@ -46,6 +47,10 @@ class AgentState(TypedDict):
     messages: Annotated[Sequence[BaseMessage], add_messages]
 
 
+# ---- Cached singletons for hybrid_search ----
+_chroma_cache = None
+_docs_cache = None
+
 # Hybrid Search Tool
 @tool
 def hybrid_search(query: str) -> List[dict]:
@@ -58,12 +63,18 @@ def hybrid_search(query: str) -> List[dict]:
     Returns:
         List[dict]: Top-matching chunks with 'text' and associated metadata.
     """
-    chroma_store = init_chroma()
-    docs = load_docs()
+    global _chroma_cache, _docs_cache
+    if _chroma_cache is None:
+        _chroma_cache = init_chroma()
+    if _docs_cache is None:
+        _docs_cache = load_docs()
+    chroma_store = _chroma_cache
+    docs = _docs_cache
 
     if not docs:
         create_chunks(pdfs_list)
         docs = load_docs()
+        _docs_cache = docs
 
     if not docs:
         print("⚠️ No documents found for search.")
@@ -379,17 +390,30 @@ def query_redirection_agent(state: AgentState) -> AgentState:
     """
     system_prompt = SystemMessage(
     content=(
-            "You are a Retrieval‑Augmented Generation orchestrator. "
-            "Analyze the user’s latest message, the conversation history, and any prior tool outputs choose exactly one tool to be called for giving a clear answer to user:\n"
-            "  1. Calling Financial Metrics— when the user gives input data like risk rate, returns and ask to calculate some ratio.\n"
-            "  2. Calling Company Overview— when the user ask about specific ratios, technical indicators, or financial analyses.\n"
-            "  3. Calling  Wikipedia Search— when the user explicitly mentions “wiki” or requests historical or contextual background.\n"
-            "  4. Calling Google Search — when the user asks for “latest”, “current”, “news”, or any real‑time factual update.\n"
-            "  5. Calling Hybrid Search — as a fallback for general document retrieval from local PDFs (e.g. annual reports or SEC filings).\n"
-            "  6. Return 'Moving to Check_Node' as response — when if the existing conversation already contains the context required to answer the query.\n\n"
-            f"Here is the conversational History : {get_context(state)}"
-            "Don't change the user query such that it looses small details while passing it to tools"
-            "It is mandatory to choose one of 6 options"
+            "You are a Retrieval-Augmented Generation orchestrator for a financial RAG system. "
+            "You have access to LOCAL PDF documents (annual reports, SEC filings, earnings reports) for Tesla. "
+            "ALWAYS prefer local documents over internet search when the query can be answered from reports or filings.\n\n"
+            "Analyze the user's latest message, conversation history, and prior tool outputs, then choose EXACTLY ONE action:\n\n"
+            "  1. Calling Hybrid Search (LOCAL PDFs) - THIS IS THE DEFAULT AND PREFERRED CHOICE. Use it when:\n"
+            "     - The user asks about company reports, annual reports, filings, financial statements, earnings, or SEC documents.\n"
+            "     - The user asks about revenue, profit, margins, risks, strategy, or any data found in corporate reports.\n"
+            "     - The user mentions a specific year (e.g. '2024', '2023') - this data is in the local PDF documents.\n"
+            "     - The query is about company-specific facts, figures, sections, or summaries from filings.\n"
+            "     - When in doubt between Hybrid Search and Google Search, ALWAYS choose Hybrid Search.\n\n"
+            "  2. Calling Google Search - ONLY when the user explicitly asks for:\n"
+            "     - Breaking news or events from today/this week (e.g. 'latest news', 'what happened today').\n"
+            "     - Live stock prices, current market data, or real-time updates.\n"
+            "     - Information that could NOT exist in any filed document (e.g. 'who won the election').\n"
+            "     - Do NOT use Google Search for questions about annual reports, revenue, financials, or company strategy.\n\n"
+            "  3. Calling Wikipedia Search - when the user explicitly says 'wiki' or asks for general encyclopedic background.\n\n"
+            "  4. Calling Company Overview - when the user asks for live financial ratios, technical indicators, or market data from Alpha Vantage.\n\n"
+            "  5. Calling Financial Metrics - when the user provides numerical data (returns, risk rates) and asks to calculate ratios like Sharpe, batting average, etc.\n\n"
+            "  6. Return 'Moving to Check_Node' - when the conversation history already contains sufficient context to answer the query.\n\n"
+            f"Conversational History: {get_context(state)}\n\n"
+            "IMPORTANT RULES:\n"
+            "- Pass the user query to the chosen tool WITHOUT modifying or losing any details.\n"
+            "- You MUST choose exactly one of the 6 options above.\n"
+            "- When the query mentions 'report', 'filing', 'annual', or a specific year, ALWAYS choose Hybrid Search."
     )
 )
 
@@ -423,7 +447,7 @@ def check_content(state: AgentState)->AgentState:
         f"Take help from this conversational history {[get_context(state)]} to decide which tool to call"
         )
     )
-    llm = ChatGroq(model=MODEL_NAME)
+    llm = ChatGroq(model=FAST_MODEL_NAME)
     llm_response = llm.invoke([final_prompt])
     append_to_response([{"check_agent":llm_response}], filename="check_agent_log.json")
 
@@ -470,7 +494,7 @@ def expand_query(
     )
 
     # Invoke LLM
-    llm = ChatGroq(model=MODEL_NAME, temperature=0.8)
+    llm = ChatGroq(model=FAST_MODEL_NAME, temperature=0.8)
     response = llm.invoke([system, human])
 
     append_to_response(
@@ -499,16 +523,18 @@ def answer_query(state: AgentState) -> AgentState:
     context_str = get_context(state)
     final_prompt = SystemMessage(
         content=(
-            "You are a Financial RAG assistant integrating tool outputs and conversation history. "
-            "When crafting your answer:\n"
-            "  • Be concise yet thorough; structure with headings or bullet points when helpful.\n"
-            "  • Cite any tool or external data you used, and link to sources if available.\n"
-            "  • If data is missing or incomplete, acknowledge it explicitly.\n"
-            "  • Maintain accuracy and clarity—do not hallucinate.\n"
-            "  • Mention the source of the information like document and links.\n"
-            "  • answer the query from context ask user for analysis or feedback\n"
-            f" Here is context required to answer the query {context_str}"
-            "Format must be like Answer: "
+            "You are a Financial RAG assistant. Generate a clear, well-formatted answer using the provided context.\n\n"
+            "FORMATTING RULES (follow these strictly):\n"
+            "  1. Start your response directly with the answer content. Do NOT prefix with 'Answer:' or similar labels.\n"
+            "  2. Use markdown formatting: ## for headings, **bold** for emphasis, bullet points for lists.\n"
+            "  3. For financial data, use clean markdown tables with | column | separators.\n"
+            "  4. For sources: write them naturally like 'According to Tesla 2024 Annual Report (10-K)...' or 'Source: Tesla 10-K Filing, Page 36'.\n"
+            "     Do NOT use raw citation markers like [...], (number), or any bracket notation.\n"
+            "  5. If data comes from a web search, mention the source name and date naturally in the text.\n"
+            "  6. If data is missing or incomplete, say so clearly.\n"
+            "  7. Do NOT hallucinate or fabricate any numbers.\n"
+            "  8. Keep the response concise but thorough. End with a brief 1-line follow-up suggestion.\n\n"
+            f"CONTEXT:\n{context_str}"
         )
     )
     llm = ChatGroq(model=MODEL_NAME)

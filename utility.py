@@ -10,6 +10,7 @@ from langchain_core.messages import HumanMessage, BaseMessage
 
 load_dotenv()
 MODEL_NAME       = os.getenv("MODEL_NAME", "qwen/qwen3-32b")
+FAST_MODEL_NAME  = os.getenv("FAST_MODEL_NAME", "llama-3.1-8b-instant")
 
 def _unwrap(item: Any) -> Any:
     """
@@ -152,22 +153,21 @@ def compress_context(state:Any) -> str:
     # Split the context into overlapping chunks of ~500 tokens with 100 token overlap
     chunks = recursive_split(context, 2000, 200)
 
-    llm = ChatGroq(model=MODEL_NAME)
+    llm = ChatGroq(model=FAST_MODEL_NAME)
     compressed = ""
 
     # Prompt to guide the LLM on how to compress each chunk
     final_prompt = (
-        "Please produce a concise and clear summary of the following conversation excerpt without any redudancy."
-        "focusing on key insights, company details, context and tools. "
-        "Maintain coherence across chunks when concatenated."
-        "Compress all context to maximum of 200 chunks size"
+        "Please produce a concise and clear summary of the following conversation excerpt without any redundancy. "
+        "Focus on key insights, company details, context and tools. "
+        "Maintain coherence and compress to maximum 200 words."
     )
 
-    for chunk in chunks:
-        msg = HumanMessage(content=chunk)
-        # Invoke LLM with prompt + chunk
-        response = llm.invoke([HumanMessage(content=final_prompt), msg])
-        final_response = remove_think(response.content)
-        compressed += final_response + "\n"
+    # Combine all chunks into a single prompt instead of looping
+    combined = "\n---\n".join(chunks)
+    response = llm.invoke([
+        HumanMessage(content=final_prompt + "\n\n" + combined)
+    ])
+    compressed = remove_think(response.content)
 
     return compressed.strip()
